@@ -1,0 +1,10 @@
+# ESPHome build artefacts
+.esphome/
+.pioenvs/
+.piolibdeps/
+
+# NIEMALS committen: enthaelt WireGuard-Keys, API-Key und WLAN-Passwort
+secrets.yaml
+
+__pycache__/
+*.pyc
