@@ -462,12 +462,21 @@ void ShellyCoiot::handle_status_(const CoapMessage &msg, const std::string &src_
 #endif
   }
 
-  // The status serial only changes when something in the report changed.
-  // Skipping repeats saves a good chunk of CPU on an ESP8266.
-  if (msg.has_serial && msg.serial == this->last_serial_) {
-    ESP_LOGVV(TAG, "Duplicate status serial %u, skipped", msg.serial);
+  // Skip genuine repeats. The status serial alone is NOT a reliable change
+  // indicator -- some firmwares keep it stable across periodic reports whose
+  // measured values have moved, which would freeze every sensor after the
+  // first packet. So a packet only counts as a duplicate when the serial AND
+  // the payload are both unchanged.
+  uint32_t hash = 2166136261u;  // FNV-1a
+  for (size_t i = 0; i < msg.payload_len; i++) {
+    hash ^= (uint8_t) msg.payload[i];
+    hash *= 16777619u;
+  }
+  if (msg.has_serial && msg.serial == this->last_serial_ && hash == this->last_payload_hash_) {
+    ESP_LOGV(TAG, "Identical status (serial %u), skipped", msg.serial);
     return;
   }
+  this->last_payload_hash_ = hash;
   if (msg.has_serial) {
     this->last_serial_ = msg.serial;
   }
@@ -609,6 +618,7 @@ void ShellyCoiot::go_offline_() {
   ESP_LOGW(TAG, "No CoIoT packet for %u ms -- Shelly considered offline", this->timeout_ms_);
   this->online_ = false;
   this->last_serial_ = 0xFFFFFFFFu;
+  this->last_payload_hash_ = 0;
 
 #ifdef USE_BINARY_SENSOR
   if (this->online_sensor_ != nullptr) {

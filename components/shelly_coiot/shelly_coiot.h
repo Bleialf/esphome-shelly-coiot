@@ -131,6 +131,7 @@ class ShellyCoiot : public Component {
   bool online_{false};
   uint32_t last_packet_ms_{0};
   uint32_t last_serial_{0xFFFFFFFFu};
+  uint32_t last_payload_hash_{0};
   std::string discovered_ip_;
   std::string discovered_devid_;
   bool first_status_logged_{false};
