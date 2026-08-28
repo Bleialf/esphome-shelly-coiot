@@ -80,6 +80,22 @@ bool ShellyCoiot::start_listener_() {
   }
 
 #ifdef USE_ESP_IDF
+  // Find the WiFi station address FIRST. Without it there is nothing to join
+  // the multicast group on, and creating/closing a socket on every loop() while
+  // WiFi is still associating is wasted work that shows up as a "took a long
+  // time for an operation" warning.
+  uint32_t sta_addr = 0;
+  esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (sta != nullptr) {
+    esp_netif_ip_info_t ip_info;
+    if (esp_netif_get_ip_info(sta, &ip_info) == ESP_OK) {
+      sta_addr = ip_info.ip.addr;
+    }
+  }
+  if (sta_addr == 0) {
+    return false;  // no address yet -- try again on the next loop()
+  }
+
   this->socket_fd_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (this->socket_fd_ < 0) {
     ESP_LOGE(TAG, "socket() failed: errno %d", errno);
@@ -108,20 +124,7 @@ bool ShellyCoiot::start_listener_() {
   // Join on the WiFi station interface explicitly. Using INADDR_ANY would
   // pick the default route, which is the WireGuard tunnel as soon as the
   // tunnel comes up -- and the Shelly is on the *local* side.
-  mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-  esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-  if (sta != nullptr) {
-    esp_netif_ip_info_t ip_info;
-    if (esp_netif_get_ip_info(sta, &ip_info) == ESP_OK && ip_info.ip.addr != 0) {
-      mreq.imr_interface.s_addr = ip_info.ip.addr;
-    }
-  }
-  if (mreq.imr_interface.s_addr == 0) {
-    // WiFi has no address yet -- retry on the next loop().
-    ::close(this->socket_fd_);
-    this->socket_fd_ = -1;
-    return false;
-  }
+  mreq.imr_interface.s_addr = sta_addr;
   if (::setsockopt(this->socket_fd_, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
     ESP_LOGE(TAG, "IP_ADD_MEMBERSHIP failed: errno %d", errno);
     ::close(this->socket_fd_);
@@ -241,7 +244,7 @@ bool ShellyCoiot::read_packet_() {
     return true;  // description packet or something else, not a status publish
   }
   if (!this->devid_matches_(msg.devid)) {
-    ESP_LOGVV(TAG, "Ignoring CoIoT packet from %s (%s)", src_ip.c_str(), msg.devid.c_str());
+    this->note_unmatched_(msg.devid, src_ip);
     return true;
   }
 
@@ -394,6 +397,27 @@ bool ShellyCoiot::devid_matches_(const std::string &devid) const {
   return true;
 }
 
+/// Report a Shelly we can hear but are configured to ignore -- once per device.
+/// This is what tells you the MAC to put into `mac:` when you do not know it,
+/// and what explains the silence when the filter is wrong.
+void ShellyCoiot::note_unmatched_(const std::string &devid, const std::string &src_ip) {
+  if (devid.empty()) {
+    return;
+  }
+  for (const auto &seen : this->unmatched_logged_) {
+    if (seen == devid) {
+      return;
+    }
+  }
+  if (this->unmatched_logged_.size() >= 8) {
+    return;  // do not let a busy network grow this without bound
+  }
+  this->unmatched_logged_.push_back(devid);
+  ESP_LOGI(TAG, "Heard CoIoT device '%s' at %s, but it does not match the filter (model '%s', mac '%s')",
+           devid.c_str(), src_ip.c_str(), this->model_.empty() ? "(any)" : this->model_.c_str(),
+           this->mac_filter_.empty() ? "(any)" : this->mac_filter_.c_str());
+}
+
 // ---------------------------------------------------------------------------
 // Status handling
 // ---------------------------------------------------------------------------
@@ -510,7 +534,12 @@ void ShellyCoiot::parse_status_payload_(const char *p, size_t len) {
       count++;
     }
   }
-  ESP_LOGD(TAG, "CoIoT status from %s: %u values", this->discovered_ip_.c_str(), count);
+  if (!this->first_status_logged_) {
+    this->first_status_logged_ = true;
+    ESP_LOGI(TAG, "First CoIoT status decoded: %u values from %s", count, this->discovered_ip_.c_str());
+  } else {
+    ESP_LOGD(TAG, "CoIoT status from %s: %u values", this->discovered_ip_.c_str(), count);
+  }
 }
 
 void ShellyCoiot::apply_value_(uint16_t id, float value) {

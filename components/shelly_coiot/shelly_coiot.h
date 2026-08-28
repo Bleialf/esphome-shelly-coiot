@@ -115,6 +115,7 @@ class ShellyCoiot : public Component {
   bool read_packet_();
   static bool parse_coap_(const uint8_t *buf, size_t len, CoapMessage &out);
   bool devid_matches_(const std::string &devid) const;
+  void note_unmatched_(const std::string &devid, const std::string &src_ip);
   void handle_status_(const CoapMessage &msg, const std::string &src_ip);
   void parse_status_payload_(const char *p, size_t len);
   void apply_value_(uint16_t id, float value);
@@ -132,6 +133,8 @@ class ShellyCoiot : public Component {
   uint32_t last_serial_{0xFFFFFFFFu};
   std::string discovered_ip_;
   std::string discovered_devid_;
+  bool first_status_logged_{false};
+  std::vector<std::string> unmatched_logged_;
 
   uint8_t buffer_[COIOT_MAX_PACKET];
 
