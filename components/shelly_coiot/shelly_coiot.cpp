@@ -373,6 +373,13 @@ bool ShellyCoiot::devid_matches_(const std::string &devid) const {
     }
   }
   if (this->mac_filter_.empty()) {
+    // No MAC configured: lock onto the first matching device we hear and stay
+    // with it, so a second Shelly of the same model cannot interleave its
+    // values into the same sensors. The lock is on the device id, not the IP,
+    // so a DHCP change does not break it.
+    if (!this->discovered_devid_.empty()) {
+      return devid == this->discovered_devid_;
+    }
     return true;
   }
   // Compare the MAC field case-insensitively.
@@ -435,6 +442,9 @@ void ShellyCoiot::handle_status_(const CoapMessage &msg, const std::string &src_
 #endif
   }
   if (msg.devid != this->discovered_devid_) {
+    if (this->mac_filter_.empty()) {
+      ESP_LOGI(TAG, "Locked onto '%s' (no mac filter configured)", msg.devid.c_str());
+    }
     this->discovered_devid_ = msg.devid;
 #ifdef USE_TEXT_SENSOR
     if (this->device_id_text_sensor_ != nullptr) {
