@@ -10,7 +10,7 @@ Push-Protokoll, das Gen1-Shellys von sich aus sprechen.
 external_components:
   - source:
       type: git
-      url: https://github.com/Bleialf/esphome-shelly-coiot
+      url: https://github.com/kevinjanisch/esphome-shelly-coiot
       ref: main
     components: [shelly_coiot]
 
