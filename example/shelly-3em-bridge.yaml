@@ -34,7 +34,7 @@ esp32:
 external_components:
   - source:
       type: git
-      url: https://github.com/DEIN-USER/esphome-shelly-coiot
+      url: https://github.com/Bleialf/esphome-shelly-coiot
       ref: main
     components: [shelly_coiot]
 
